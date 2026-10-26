@@ -1,5 +1,38 @@
 https://huggingface.co/datasets/Dingdong-Inc/FreshRetailNet-50K
+
 包含所有易腐生鲜食品，（牛奶牛肉荔枝等等，product_id并不代表任何）
 
+
+
+
+
 https://www.kaggle.com/datasets/felixzhao/productdemandforecasting/code
+
 别人预测产品的..code例子？
+
+
+
+
+
+
+https://www.kaggle.com/datasets/suraj520/dairy-goods-sales-dataset/code
+
+包含Product Name、Quantity (liters/kg)、Shelf Life (days)、Storage Condition、Production Date、
+Expiration Date、Quantity Sold (liters/kg) 、Quantity in Stock的数据
+
+
+
+
+
+https://www.kaggle.com/datasets/beatafaron/fmcg-daily-sales-data-to-2022-2024
+
+包含Daily sales quantities, prices, promotions, stock, delivery lag (lead time)、
+Seasonality and product introductions
+
+
+
+
+
+https://zenodo.org/records/7853252
+
+包含MEVGAL提供的一系列乳制品代码的每日销售数据
