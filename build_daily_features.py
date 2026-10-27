@@ -1,7 +1,7 @@
 import argparse
 import csv
-import json
-from collections import defaultdict
+import re
+from collections import Counter, defaultdict
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -9,6 +9,14 @@ from pathlib import Path
 
 YEAR = 2024
 EXCLUDED_CATEGORIES = {"Margarine", "Butter with vegetable oil"}
+CALENDAR_FIELDS = (
+    "iso_weekday",
+    "is_weekend",
+    "is_sunday",
+    "is_named_holiday",
+    "is_general_holiday",
+    "holiday_name_en",
+)
 WEATHER_FIELDS = (
     "mean_pressure_hpa",
     "max_temperature_c",
@@ -24,15 +32,31 @@ WEATHER_FIELDS = (
     "prevailing_wind_direction_deg",
     "mean_wind_speed_kmh",
 )
-CALENDAR_FIELDS = (
-    "iso_weekday",
-    "is_weekend",
-    "is_sunday",
-    "is_named_holiday",
-    "is_general_holiday",
-    "holiday_name_en",
+PANEL_FIELDS = (
+    "date",
+    "Product Code",
+    "Product Name",
+    "Brand",
+    "Category 2",
+    "Category 3",
+    "Price",
+    "Offers",
+    "promo_flag",
+    "promo_type",
+    "promo_parse_status",
+    "buy_qty",
+    "save_amount",
+    "discount_pct",
+    "depth_pct",
+    "effective_unit_price",
+    "previous_observed_price_date",
+    "previous_observed_price",
+    "price_change",
+    "price_changed",
+    *CALENDAR_FIELDS,
+    *WEATHER_FIELDS,
 )
-OUTPUT_FIELDS = (
+DAILY_FIELDS = (
     "date",
     *CALENDAR_FIELDS,
     *WEATHER_FIELDS,
@@ -40,15 +64,25 @@ OUTPUT_FIELDS = (
     "dairy_sku_count",
     "price_observation_count",
     "promo_sku_count",
+    "promo_parseable_sku_count",
+    "promo_parse_rate",
+    "mean_promo_depth_pct",
     "price_change_count",
-    "promotional_offers_json",
-    "price_changes_json",
 )
+MONEY = r"\$\s*(\d+(?:\.\d{1,2})?)"
 
 
 def read_csv(path: Path) -> list[dict[str, str]]:
     with path.open(encoding="utf-8-sig", newline="") as source:
         return list(csv.DictReader(source))
+
+
+def write_csv(path: Path, fieldnames: tuple[str, ...], rows: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8-sig", newline="") as output:
+        writer = csv.DictWriter(output, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 def index_by_date(
@@ -63,46 +97,189 @@ def index_by_date(
     return indexed
 
 
-def json_cell(items: list[dict]) -> str:
-    return json.dumps(items, ensure_ascii=False, separators=(",", ":"))
+def parse_offer(offer: str, regular_price: Decimal) -> dict:
+    parsed = {
+        "promo_flag": bool(offer.strip()),
+        "promo_type": "none",
+        "promo_parse_status": "no_offer",
+        "buy_qty": None,
+        "save_amount": None,
+        "discount_pct": None,
+        "depth_pct": None,
+        "effective_unit_price": None,
+    }
+    if not offer.strip():
+        return parsed
+
+    text = re.sub(r"\s+", " ", offer).strip()
+    candidates = []
+    patterns = (
+        (
+            "multi_buy_saving",
+            rf"\bbuy\s+(\d+)\s+(?:to\s+)?save\s+{MONEY}",
+        ),
+        (
+            "multi_buy_saving",
+            rf"\bpurchase\s+(\d+)\s+(?:items?|pcs?)\b.*?\bsave\s+{MONEY}",
+        ),
+        (
+            "buy_get_free",
+            r"\bbuy\s+(\d+)\s+get\s+(\d+)\s+free\b",
+        ),
+        (
+            "multi_buy_price",
+            rf"\bbuy\s+(\d+)\s+(?:at|for)\s+{MONEY}",
+        ),
+        (
+            "second_item_discount",
+            rf"\bbuy\s+second\s+for\s+{MONEY}",
+        ),
+        (
+            "percentage_discount",
+            r"\b(?:enjoy\s+)?(\d+(?:\.\d+)?)\s*%\s*off\b",
+        ),
+    )
+
+    for promo_type, pattern in patterns:
+        for match in re.finditer(pattern, text, re.IGNORECASE):
+            groups = match.groups()
+            if promo_type == "multi_buy_saving":
+                quantity, saving = int(groups[0]), Decimal(groups[1])
+                total_regular = regular_price * quantity
+                if quantity > 0 and Decimal(0) <= saving < total_regular:
+                    effective = (total_regular - saving) / quantity
+                    candidates.append(
+                        (saving / total_regular, promo_type, quantity, saving, effective)
+                    )
+            elif promo_type == "buy_get_free":
+                paid_quantity, free_quantity = map(int, groups)
+                total_quantity = paid_quantity + free_quantity
+                if paid_quantity > 0 and free_quantity > 0:
+                    saving = regular_price * free_quantity
+                    effective = regular_price * paid_quantity / total_quantity
+                    candidates.append(
+                        (
+                            saving / (regular_price * total_quantity),
+                            promo_type,
+                            total_quantity,
+                            saving,
+                            effective,
+                        )
+                    )
+            elif promo_type == "multi_buy_price":
+                quantity, bundle_price = int(groups[0]), Decimal(groups[1])
+                total_regular = regular_price * quantity
+                if quantity > 0 and Decimal(0) < bundle_price < total_regular:
+                    saving = total_regular - bundle_price
+                    candidates.append(
+                        (
+                            saving / total_regular,
+                            promo_type,
+                            quantity,
+                            saving,
+                            bundle_price / quantity,
+                        )
+                    )
+            elif promo_type == "second_item_discount":
+                second_price = Decimal(groups[0])
+                if Decimal(0) <= second_price < regular_price:
+                    saving = regular_price - second_price
+                    candidates.append(
+                        (
+                            saving / (regular_price * 2),
+                            promo_type,
+                            2,
+                            saving,
+                            (regular_price + second_price) / 2,
+                        )
+                    )
+            else:
+                discount_pct = Decimal(groups[0])
+                if Decimal(0) < discount_pct < Decimal(100):
+                    quantity_match = re.search(
+                        r"\b(?:buy|purchase)\s+(\d+)\s+(?:items?|pcs?)\b",
+                        text,
+                        re.IGNORECASE,
+                    )
+                    quantity = int(quantity_match.group(1)) if quantity_match else None
+                    saving = (
+                        regular_price * (quantity or 1) * discount_pct / Decimal(100)
+                    )
+                    candidates.append(
+                        (
+                            discount_pct / Decimal(100),
+                            promo_type,
+                            quantity,
+                            saving,
+                            regular_price * (Decimal(1) - discount_pct / Decimal(100)),
+                        )
+                    )
+
+    if not candidates:
+        parsed["promo_type"] = "other"
+        parsed["promo_parse_status"] = "unparsed"
+        return parsed
+
+    depth, promo_type, quantity, saving, effective = max(
+        candidates, key=lambda item: item[0]
+    )
+    if len(candidates) > 1 or "/" in text:
+        promo_type = "compound"
+
+    parsed.update(
+        {
+            "promo_type": promo_type,
+            "promo_parse_status": "parsed",
+            "buy_qty": quantity,
+            "save_amount": saving,
+            "discount_pct": depth * Decimal(100),
+            "depth_pct": depth,
+            "effective_unit_price": effective,
+        }
+    )
+    if len(candidates) > 1:
+        parsed["promo_parse_status"] = "parsed_compound_primary_offer"
+    return parsed
 
 
-def decimal_text(value: Decimal) -> str:
-    return format(value, "f")
+def decimal_cell(value: Decimal | None) -> str:
+    return "" if value is None else format(value, "f")
 
 
 def main() -> None:
     script_dir = Path(__file__).resolve().parent
     parser = argparse.ArgumentParser(
-        description=(
-            "Build one daily 2024 calendar/weather row with dairy offers "
-            "and observed price changes."
-        )
+        description="Build a flat 2024 SKU-day price panel and daily context table."
     )
     parser.add_argument(
         "--prices",
         type=Path,
         default=next(script_dir.glob("01_*.csv"), None),
-        help="Daily dairy price CSV (default: the matching 01_*.csv beside this script).",
+        help="Daily dairy price CSV (default: matching 01_*.csv beside this script).",
     )
     parser.add_argument(
         "--calendar",
         type=Path,
         default=next(script_dir.glob("02_*.csv"), None),
-        help="Holiday calendar CSV (default: the matching 02_*.csv beside this script).",
+        help="Holiday calendar CSV (default: matching 02_*.csv beside this script).",
     )
     parser.add_argument(
         "--weather",
         type=Path,
         default=next(script_dir.glob("03_*.csv"), None),
-        help="Daily weather CSV (default: the matching 03_*.csv beside this script).",
+        help="Daily weather CSV (default: matching 03_*.csv beside this script).",
     )
     parser.add_argument(
-        "-o",
-        "--output",
+        "--panel-output",
+        type=Path,
+        default=script_dir / "sku_daily_prices_2024.csv",
+        help="Flat SKU-day output path.",
+    )
+    parser.add_argument(
+        "--daily-output",
         type=Path,
         default=script_dir / "daily_features_2024.csv",
-        help="Output CSV path (default: daily_features_2024.csv beside this script).",
+        help="One-row-per-date context output path.",
     )
     args = parser.parse_args()
     if not args.prices or not args.calendar or not args.weather:
@@ -119,116 +296,156 @@ def main() -> None:
         if key.startswith(f"{YEAR}-")
     }
     expected_dates = {
-        date(YEAR, 1, 1).fromordinal(ordinal).isoformat()
+        date.fromordinal(ordinal).isoformat()
         for ordinal in range(
             date(YEAR, 1, 1).toordinal(),
             date(YEAR + 1, 1, 1).toordinal(),
         )
     }
-    if set(calendar) != expected_dates:
-        missing = sorted(expected_dates - set(calendar))
-        extra = sorted(set(calendar) - expected_dates)
-        raise ValueError(
-            f"Calendar must cover all {YEAR} dates exactly once; "
-            f"missing={missing[:5]}, extra={extra[:5]}."
-        )
-    if set(weather) != expected_dates:
-        missing = sorted(expected_dates - set(weather))
-        extra = sorted(set(weather) - expected_dates)
-        raise ValueError(
-            f"Weather must cover all {YEAR} dates exactly once; "
-            f"missing={missing[:5]}, extra={extra[:5]}."
-        )
+    for label, indexed in (("Calendar", calendar), ("Weather", weather)):
+        if set(indexed) != expected_dates:
+            missing = sorted(expected_dates - set(indexed))
+            extra = sorted(set(indexed) - expected_dates)
+            raise ValueError(
+                f"{label} must cover all {YEAR} dates exactly once; "
+                f"missing={missing[:5]}, extra={extra[:5]}."
+            )
 
-    prices_by_date: dict[str, list[dict[str, str]]] = defaultdict(list)
+    source_rows = [
+        row
+        for row in read_csv(args.prices)
+        if row.get("archive_date", "").startswith(f"{YEAR}-")
+        and row.get("Category 3", "").strip() not in EXCLUDED_CATEGORIES
+    ]
+    source_rows.sort(key=lambda row: (row["archive_date"], row["Product Code"]))
+
+    panel_rows = []
+    daily_prices: dict[str, list[dict]] = defaultdict(list)
     previous_price_by_sku: dict[str, tuple[str, Decimal]] = {}
-    changes_by_date: dict[str, list[dict]] = defaultdict(list)
     seen_sku_dates = set()
-    for row in read_csv(args.prices):
-        row_date = row.get("archive_date", "")
-        if not row_date.startswith(f"{YEAR}-"):
-            continue
-        if row.get("Category 3", "").strip() in EXCLUDED_CATEGORIES:
-            continue
+    promo_counts = Counter()
+    promo_parse_counts = Counter()
+    price_change_counts = Counter()
+    promo_depths: dict[str, list[Decimal]] = defaultdict(list)
 
-        sku = row.get("Product Code", "").strip()
+    for source in source_rows:
+        row_date = source["archive_date"]
+        sku = source.get("Product Code", "").strip()
         if not sku:
             raise ValueError(f"Price row on {row_date} has no Product Code.")
         if (row_date, sku) in seen_sku_dates:
             raise ValueError(f"Duplicate price observation for {sku} on {row_date}.")
         seen_sku_dates.add((row_date, sku))
-        price = Decimal(row["Price"])
+
+        price = Decimal(source["Price"])
         if price <= 0:
             raise ValueError(f"Non-positive price for {sku} on {row_date}.")
-        prices_by_date[row_date].append(row)
-
+        promo = parse_offer(source.get("Offers", ""), price)
         previous = previous_price_by_sku.get(sku)
-        if previous is not None and previous[1] != price:
-            previous_date, previous_price = previous
-            changes_by_date[row_date].append(
-                {
-                    "product_code": sku,
-                    "product_name": row.get("Product Name", ""),
-                    "brand": row.get("Brand", ""),
-                    "previous_price_date": previous_date,
-                    "previous_price": decimal_text(previous_price),
-                    "price": decimal_text(price),
-                    "change": decimal_text(price - previous_price),
-                }
-            )
+        previous_date = previous[0] if previous else ""
+        previous_price = previous[1] if previous else None
+        change = price - previous_price if previous_price is not None else None
         previous_price_by_sku[sku] = (row_date, price)
 
-    output_rows = []
+        row = {
+            "date": row_date,
+            "Product Code": sku,
+            "Product Name": source.get("Product Name", ""),
+            "Brand": source.get("Brand", ""),
+            "Category 2": source.get("Category 2", ""),
+            "Category 3": source.get("Category 3", ""),
+            "Price": format(price, "f"),
+            "Offers": source.get("Offers", "").strip(),
+            **{
+                key: (
+                    decimal_cell(value)
+                    if isinstance(value, Decimal)
+                    else str(value).lower()
+                    if isinstance(value, bool)
+                    else value if value is not None else ""
+                )
+                for key, value in promo.items()
+            },
+            "previous_observed_price_date": previous_date,
+            "previous_observed_price": decimal_cell(previous_price),
+            "price_change": decimal_cell(change),
+            "price_changed": str(change is not None and change != 0).lower(),
+        }
+        row.update({key: calendar[row_date].get(key, "") for key in CALENDAR_FIELDS})
+        row.update({key: weather[row_date].get(key, "") for key in WEATHER_FIELDS})
+        panel_rows.append(row)
+        daily_prices[row_date].append(row)
+
+        if promo["promo_flag"]:
+            promo_counts[row_date] += 1
+            if promo["promo_parse_status"].startswith("parsed"):
+                promo_parse_counts[row_date] += 1
+                promo_depths[row_date].append(promo["depth_pct"])
+        if change is not None and change != 0:
+            price_change_counts[row_date] += 1
+
+    daily_rows = []
     for row_date in sorted(expected_dates):
-        day_prices = prices_by_date.get(row_date, [])
-        offers = [
+        day_rows = daily_prices.get(row_date, [])
+        parsed_count = promo_parse_counts[row_date]
+        offer_count = promo_counts[row_date]
+        depths = promo_depths[row_date]
+        daily_row = {"date": row_date}
+        daily_row.update({key: calendar[row_date].get(key, "") for key in CALENDAR_FIELDS})
+        daily_row.update({key: weather[row_date].get(key, "") for key in WEATHER_FIELDS})
+        daily_row.update(
             {
-                "product_code": row["Product Code"],
-                "product_name": row.get("Product Name", ""),
-                "brand": row.get("Brand", ""),
-                "category": row.get("Category 3", ""),
-                "price": row.get("Price", ""),
-                "offer": row.get("Offers", "").strip(),
-            }
-            for row in day_prices
-            if row.get("Offers", "").strip()
-        ]
-        price_changes = changes_by_date.get(row_date, [])
-        row = {"date": row_date}
-        row.update({field: calendar[row_date].get(field, "") for field in CALENDAR_FIELDS})
-        row.update({field: weather[row_date].get(field, "") for field in WEATHER_FIELDS})
-        row.update(
-            {
-                "price_data_available": str(bool(day_prices)).lower(),
-                "dairy_sku_count": len({item["Product Code"] for item in day_prices}),
-                "price_observation_count": len(day_prices),
-                "promo_sku_count": len(offers),
-                "price_change_count": len(price_changes),
-                "promotional_offers_json": json_cell(offers),
-                "price_changes_json": json_cell(price_changes),
+                "price_data_available": str(bool(day_rows)).lower(),
+                "dairy_sku_count": len({row["Product Code"] for row in day_rows}),
+                "price_observation_count": len(day_rows),
+                "promo_sku_count": offer_count,
+                "promo_parseable_sku_count": parsed_count,
+                "promo_parse_rate": (
+                    format(Decimal(parsed_count) / Decimal(offer_count), ".6f")
+                    if offer_count
+                    else ""
+                ),
+                "mean_promo_depth_pct": (
+                    format(
+                        sum(depths, Decimal(0)) / Decimal(len(depths)),
+                        ".6f",
+                    )
+                    if depths
+                    else ""
+                ),
+                "price_change_count": price_change_counts[row_date],
             }
         )
-        output_rows.append(row)
+        daily_rows.append(daily_row)
 
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    with args.output.open("w", encoding="utf-8-sig", newline="") as output:
-        writer = csv.DictWriter(output, fieldnames=OUTPUT_FIELDS)
-        writer.writeheader()
-        writer.writerows(output_rows)
+    write_csv(args.panel_output, PANEL_FIELDS, panel_rows)
+    write_csv(args.daily_output, DAILY_FIELDS, daily_rows)
 
-    unavailable_dates = [
-        row["date"] for row in output_rows if row["price_data_available"] == "false"
+    promo_rows = [row for row in panel_rows if row["promo_flag"] == "true"]
+    parsed_rows = [
+        row for row in promo_rows if row["promo_parse_status"].startswith("parsed")
     ]
+    parse_rate = len(parsed_rows) / len(promo_rows) if promo_rows else 1.0
     print(
-        f"Saved {len(output_rows)} daily rows for {YEAR} to {args.output}; "
-        f"{sum(row['promo_sku_count'] for row in output_rows)} promo SKU-days; "
-        f"{sum(row['price_change_count'] for row in output_rows)} observed price changes."
+        f"Saved {len(panel_rows)} flat SKU-day rows to {args.panel_output}; "
+        f"{len(daily_rows)} daily rows to {args.daily_output}."
     )
-    if unavailable_dates:
-        print(
-            "Price data unavailable (not treated as zero offers/changes): "
-            + ", ".join(unavailable_dates)
-        )
+    print(
+        f"Parsed {len(parsed_rows)}/{len(promo_rows)} promotional SKU-days "
+        f"({parse_rate:.2%}); "
+        f"{sum(price_change_counts.values())} observed price changes."
+    )
+    unparsed = Counter(
+        row["Offers"]
+        for row in promo_rows
+        if not row["promo_parse_status"].startswith("parsed")
+    )
+    if unparsed:
+        print("Unparsed offer examples:")
+        for offer, count in unparsed.most_common(10):
+            print(f"  {count}: {offer}")
+    if parse_rate < 0.95:
+        raise SystemExit("Promotion parse rate is below the required 95% threshold.")
 
 
 if __name__ == "__main__":
