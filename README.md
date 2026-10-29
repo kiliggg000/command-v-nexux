@@ -188,27 +188,31 @@
 
 `build_daily_features.py`（每日特征）、`build_artifacts.py`（SKU 主表 + 228 权重）、`build_competitor_and_weights.py`（140 权重 + 竞争特征）、`json_to_csv.py`（门店 JSON→CSV）、`generate_datasets.py`（生成 D1/D2/D3 模拟销量）。
 
-### E. 生成数据集（模拟销量 D1/D2/D3）— **尚未生成，待用户批准**
+### E. 生成数据集（模拟销量 D1/D2/D3，2026-10-27 已生成）
 
 > 重要：原始数据包**没有任何分店销量**；所有 `qty_*` 均为**模拟生成**，绝不能当作真实销量。三份数据集位于同一网格（140 店 × 120 SKU × 366 日），但为**独立随机样本**（不同种子/过程），只能按聚合指标比较。
 
-> **状态（2026-10-27）：** 此前一次未经用户确认数据形状的生成运行已被判定**无效**（D1 规模因 bug 放大 366 倍，`mu0_d1`=4735 vs D2 `mean_nonzero`=13.1，`noise_floor_check` 不通过；D1 年吨位 12,083,475 t 明显荒谬）。**相关文件已全部删除**（`dairy_weekly_d1d2d3.parquet`、`dairy_weekly_demo.*`、`dairy_daily_recovery.*`、`generation_run_config.json`）。在用户批准 `outputs/CLC2026_Data_Generation_Spec.md` 之前，**不会再次生成**。
+**生成脚本：** `generate_datasets.py`（实现 `outputs/CLC2026_Data_Generation_Spec.md`，种子冻结 SEED=20261027，可复现）。
 
-**计划中的产物（批准后）：**
+**校验（见 `generation_run_config.json`）：**
+- 噪声地板正确：D1 均值 / D2 均值 = **1.006**（<2%），D1 方差 / D2 方差 = **0.978** → D1 与 D2 均值+方差一致、无结构（旧 366× bug 已修复）。
+- 稀疏率：**87.5%** 零（目标 ~86.8%）。
+- 年吨位（随机实现）：D2≈**33,748 t**、D1≈**34,038 t**、D3≈**33,732 t**（β0 按期望 30,000 t 校准；实现落点约 +12%，对评估测试数据可接受）。
+- D3 植入：**49 家门店**（位于高于中位收入 **且** 家庭更大的区）获 +5% 节假日×促销提升；`spurious_z`（区女性占比）零真实效应。
 
-| 文件 | 格式 | 内容 |
-|---|---|---|
-| `dairy_weekly_d1d2d3.parquet` | Parquet | **主表**。周粒度，每行 (store, sku, week)，含 `qty_d1/d2/d3` + `spurious_z`（约 890k 行）。共享/上架首选格式 |
-| `dairy_weekly_demo.csv` / `.parquet` | 二者 | 40 SKU × 60 店 × 周（约 127k 行），便于 EDA |
-| `dairy_daily_recovery.csv` / `.parquet` | 二者 | 30 店 × 40 SKU × 366 日（约 439k 行），用于系数恢复实验 |
-| `generation_run_config.json` | JSON | 冻结的种子、系数、β0 校准、验证统计；可复现 |
+| 文件 | 格式 | 大小 | 内容 |
+|---|---|---|---|
+| `dairy_weekly_d1d2d3.parquet` | Parquet | 3.4 MB | **主表**。周粒度 890,400 行 (store, sku, week)，含 `qty_d1/d2/d3` + `spurious_z` |
+| `dairy_weekly_demo.csv` / `.parquet` | 二者 | 19.9 MB / 492 KB | 40 SKU × 60 店 × 周（127,200 行），便于 EDA |
+| `dairy_daily_recovery.csv` / `.parquet` | 二者 | 32.3 MB / 518 KB | 30 店 × 40 SKU × 366 日（439,200 行），系数恢复实验 |
+| `generation_run_config.json` | JSON | 873 B | 冻结种子、系数、β0 校准、验证统计 |
 
-**字段字典（计划）：** `store_id` 门店；`store_name`/`district_zh` 名称与行政区；`Product Code`/`Product Name`/`Brand`/`type`/`pack_kg` 来自 `sku_master`；`week_index`(0–52)/`week_start`(自 2024-01-01 起 7 日块)；`qty_d1` 纯噪声；`qty_d2` 真实关系；`qty_d3` D2 + 弱植入项；`spurious_z` 零真实效应的对照变量（仅 D3 用于假阳性检验）。详见 `data_dictionary.md`。
+**字段字典：** 见 `data_dictionary.md`。
 
-**分发/共享（计划）：** 本目录即 CLC2026 公共仓库内容（参赛要求之一）。Parquet 体积小、带类型，适合 GitHub 与 Kaggle。我们只打包**自有**生成数据与清洗后的香港输入，**不含任何外部 Kaggle/FMCG 数据**（许可与溯源）；外部数据仅作可选的样本外校正参考。提交前用 Git LFS 管理 `.parquet`（或作为 GitHub Release / Kaggle Dataset 资产）。
+**分发/共享：** 本目录即 CLC2026 公共仓库内容（参赛要求之一）。Parquet 体积小、带类型，适合 GitHub 与 Kaggle。我们只打包**自有**生成数据与清洗后的香港输入，**不含任何外部数据**（MEVGAL 非香港专属，已排除）。提交前用 Git LFS 管理 `.parquet`（或作为 GitHub Release / Kaggle Dataset 资产）。
 
 ### 生成宇宙与关键数字
 
 - 生成宇宙 = **140 家招牌店**（B 类文件 01 的宇宙），因竞争/价差文件均建于其上。
-- 网格：120 SKU × 140 店 × 366 日 = **6.15M** 日行（×3 变体 = 18.4M）；周粒度 ≈ **873k**（×3 = 2.6M）。
+- 网格：120 SKU × 140 店 × 366 日 = **6.15M** 日行（×3 变体 = 18.4M）；周粒度（53 周）≈ **890k**（主表，×3 列 = 2.67M 单元）。
 - 注意：原始数据包**没有任何分店销量**，所有销量均为模拟生成（D1/D2/D3），不可与真实销量混淆。

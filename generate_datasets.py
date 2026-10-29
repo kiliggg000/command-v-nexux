@@ -108,8 +108,8 @@ is_wknd = daily["is_weekend"].to_numpy().astype(int)
 is_sun = daily["is_sunday"].to_numpy().astype(int)
 is_hol = np.maximum(daily["is_named_holiday"].to_numpy().astype(int),
                     daily["is_general_holiday"].to_numpy().astype(int))
-rain = daily["rainfall_mm"].to_numpy().astype(float)
-temp = daily["mean_temperature_c"].to_numpy().astype(float)
+rain = np.nan_to_num(daily["rainfall_mm"].to_numpy().astype(float), nan=0.0)   # 73 missing readings -> 0
+temp = np.nan_to_num(daily["mean_temperature_c"].to_numpy().astype(float), nan=0.0)
 t = np.arange(N_DAY)
 season = np.sin(2 * np.pi * t / 365.25)
 trend = t / float(N_DAY)
@@ -217,15 +217,22 @@ demo = flat[(flat["store_id"].isin(store_id[:60])) & (flat["Product Code"].isin(
 demo.to_parquet(fpath("dairy_weekly_demo.parquet"), index=False)
 demo.to_csv(fpath("dairy_weekly_demo.csv"), index=False)
 
-# Daily recovery subset (first 30 store x first 40 SKU x 366 day) with features
+# Daily recovery subset (first 30 store x first 40 SKU x 366 day) with full daily features
 ri, ki2, ti = np.meshgrid(np.arange(30), np.arange(40), np.arange(N_DAY), indexing="ij")
 ri, ki2, ti = ri.ravel(), ki2.ravel(), ti.ravel()
+pflag = (depth > 0).astype(int)
 rec = pd.DataFrame({
     "store_id": store_id[ri],
     "Product Code": prod_code[ki2],
-    "date": np.repeat(daily["date"].to_numpy(), 30 * 40),
+    "type": sku["type"].to_numpy()[ki2],
+    "date": daily["date"].to_numpy()[ti],
+    "iso_weekday": daily["iso_weekday"].to_numpy()[ti],
+    "is_weekend": is_wknd[ti],
+    "is_general_holiday": is_hol[ti],
+    "rainfall_mm": rain[ti],
+    "promo_flag": pflag[ki2, ti],
     "depth_pct": depth[ki2, ti],
-    "is_holiday": is_hol[ti],
+    "qty_d1": qty_d1[ri, ki2, ti],
     "qty_d2": qty_d2[ri, ki2, ti],
     "qty_d3": qty_d3[ri, ki2, ti],
     "spurious_z": np.repeat(gender_mix[:30], 40 * N_DAY)[ri],

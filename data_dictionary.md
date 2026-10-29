@@ -11,9 +11,9 @@ Generated on a 140 stores × 120 SKUs × 366 days grid, then rolled up to weekly
 
 | Variant | What it is | Role in the experiment |
 |---|---|---|
-| **D1** (`qty_d1`) | Pure noise: i.i.d. Negative‑Binomial at D2's realised marginal mean/variance, same 86.8% censoring. No time/store/SKU structure. | False‑positive floor / leak gate; a model's error must never fall below σ. |
-| **D2** (`qty_d2`) | Realistic log‑linear demand surface from defensible relationships + overdispersion + censoring, calibrated to the USDA tonnage sanity band. | Primary evaluation; coefficient‑recovery test (known truth). |
-| **D3** (`qty_d3`) | D2 surface **plus** 2–3 deliberately weak planted terms (amplified supermarket competition, promo×competition interaction) + a zero‑effect spurious covariate. | Retrieval / detection test; false‑positive control. |
+| **D1** (`qty_d1`) | Pure noise: D2's `μ` shuffled across all cells (same ~86.8% censoring, mean & variance matched to D2). No time/store/SKU structure. | False‑positive floor / leak gate; a model's error must never fall below σ. |
+| **D2** (`qty_d2`) | Realistic log‑linear demand surface from defensible relationships + overdispersion + censoring, calibrated to a tonnage target. | Primary evaluation; coefficient‑recovery test (known truth). |
+| **D3** (`qty_d3`) | D2 surface **plus** a +5% holiday×promo boost for stores in districts that are above‑median income **and** larger‑household (real 2021 census demographics) + a zero‑effect spurious covariate (district female share). | Retrieval / detection test; false‑positive control. |
 
 Because the three are independent random samples, compare them **only on aggregated
 metrics** (error distribution, recovery rate, CI coverage, false‑positive rate) — never
@@ -38,7 +38,7 @@ One row per `(store, sku, week)`. Weekly = 7‑day blocks from 2024‑01‑01 (`
 | `qty_d1` | int | D1 simulated weekly units |
 | `qty_d2` | int | D2 simulated weekly units |
 | `qty_d3` | int | D3 simulated weekly units |
-| `spurious_z` | float | Zero‑true‑effect covariate (per store‑SKU, constant over time). Included so models can be tested for falsely "finding" it. |
+| `spurious_z` | float | Zero‑true‑effect covariate — district female share (per store, constant across SKU and week). Included so models can be tested for falsely "finding" it. |
 
 ## `dairy_weekly_demo.csv` / `.parquet`  (~127k rows)
 
@@ -49,7 +49,9 @@ week_index, week_start, qty_d1, qty_d2, qty_d3, spurious_z`. For quick EDA.
 
 Subset: 30 stores × 40 SKUs × 366 days. Columns: `store_id, Product Code, type, date,
 iso_weekday, is_weekend, is_general_holiday, rainfall_mm, promo_flag, depth_pct, qty_d1,
-qty_d2, qty_d3, spurious_z`. Used for the daily coefficient‑recovery experiment.
+qty_d2, qty_d3, spurious_z`. Full daily features are included so the recovery experiment can
+recover β_promo, β_hol, β_wknd, β_rain, etc., and confirm the spurious_z is NOT falsely found.
+Source `rainfall_mm` had 73 missing readings → filled with 0.
 
 ## `sku_master.csv`  (real, 120 rows)
 
