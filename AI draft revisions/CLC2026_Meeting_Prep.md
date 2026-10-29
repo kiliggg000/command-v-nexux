@@ -254,11 +254,95 @@ formula, quirks/problems, fit. Recommendation is *last*, not first.)
   the recovery story — keep as an optional cross-check, not the headline.
 - **Out as primary:** LSTM/MLP (#10) and ARIMA (#7) — black box / zero-handling failure.
 
+#### Beginner map: how new data goes in, what comes out, how we measure error & confidence
+
+*(Answers your four "I have no clue" questions, in plain words — mapped to K-means / Bayes / MLP
+you already know.)*
+
+**Q1 — How is new data input into the model?** There are two different "inputs," and confusing
+them is the #1 forecasting mistake:
+- **Training input** = the *historical* rows we fit on: for each past week, the *features*
+  (promo, weather, calendar, competition) **plus** the *actual sales* (the target we learn to predict).
+- **Prediction input** = when we want next week's forecast, we feed the model the *future features
+  we already know* (next week's promo calendar, the weather forecast, known holidays) — **but never
+  next week's sales**. The model outputs a number; reality shows up later and we score it.
+
+So "new data" at forecast time = known future *conditions*, not future *sales*. This is exactly
+why we can't randomly shuffle (§1.3): future-day *features* are legitimately known, but future-day
+*sales* are not, so the split must be by time.
+
+**Q2 — What output can be found?** Three layers, from least to most useful:
+- **Point forecast** — one expected number (e.g. "expect 412 kg of UHT milk at store X next week").
+- **Prediction interval** — a range with a stated confidence (e.g. "410 ± 60 kg at 80%"), your
+  Bayesian intuition made operational.
+- **Probabilities** — once you have the distribution you can answer business questions directly:
+  P(stockout) = P(demand > on-shelf stock), P(waste) = P(demand < minimum display),
+  P(demand exceeds promo stock). These are what a replenishment dashboard actually wants.
+
+**Q3 — How are error / confidence / probabilities measured?** (See also §1.4–1.5.)
+- **Error** = WAPE and MAE — how far the point forecast missed, in total and per store.
+- **Confidence** = *calibration*: an 80% interval should contain the truth ~80% of the time. We
+  check this on the held-out test set by measuring coverage %. An over-confident model (claims
+  ±5%, misses by ±20%) fails here.
+- **Probabilities** come from the model's assumed distribution. For the NegBin GLM the interval is
+  derived from var = μ + μ²/r (no extra machinery); for tree/ML models you get intervals via
+  quantile loss or bootstrapping.
+
+**Q4 — Is there really a split between "training data" and "input data"?** Yes, and it's the
+backbone of honest forecasting:
+- **Training data** = past rows used to *learn* parameters (features + historical sales).
+- **Input data at prediction time** = future rows' *features only* (we know promo/weather/holiday
+  ahead of time; we do NOT know future sales).
+- The line you never cross: using a future *sales* value to predict the past = look-ahead bias.
+  The time split (§1.3) enforces this. So "training vs input" is real, but it's "past sales (learn)
+  vs future conditions (predict)" — not two separately-collected datasets.
+
+#### Our four "don't" criteria — turn your instincts into selection axes
+
+You listed four things you *don't* want. Each is a real, testable modeling property. These are
+**axes to score the menu against**, not a verdict — bring them to the meeting.
+
+1. **Don't overfit to one store.** → prefer models that **share shape across stores** and allow
+   only *limited* store-specific offset (pooled / partial-pooling). A separate 16,800-model fit
+   would memorize noise. *Scores:* #4 NegBin GLM (regularised store effects) and #11 Bayesian
+   hierarchical (partial pooling) pass; "fit 16,800 independent models" fails.
+
+2. **Don't be beaten by each store's own local model — yet stores across the street differ a lot.**
+   → this is the classic tension, resolved by **partial pooling**: learn a *common* demand shape
+   from all stores, then shift each store by an offset *shrunk* toward the group mean. It captures
+   "across-the-street" differences **without** the overfitting of a pure per-store fit, and on
+   average beats naive local models on short/sparse series. *Scores:* #4 and #11 do this; a single
+   global model (#3 Poisson, #8 ETS) loses the store differences; pure per-store fitting loses
+   generalization.
+
+3. **Don't adapt too quickly to seasonal changes.** → seasonal patterns (CNY, summer) are
+   *repeatable*, so we want the model to *learn* a **stable** seasonal component, not *chase* every
+   seasonal blip as if permanent. Models with a smoothed/regularised seasonal term adapt slowly;
+   **seasonal-naive (#1) actually adapts instantly** (it just repeats last year) and can overreact
+   to a one-off anomaly — good as a floor, bad as a philosophy. *Scores:* prefer stable-seasonality
+   candidates; flag any model that re-estimates season from scratch each window.
+
+4. **Don't fail to adapt as tastes change.** → "tastes change" = *concept drift / trend*. We need a
+   model that bends its intercept/trend **slowly** to genuine drift but ignores weekly noise.
+   Options: a trend component (ETS with trend), a slowly-moving local level, or simply
+   **re-fitting on a rolling/expanding window** (walk-forward, Part 3) so the model periodically
+   re-learns on recent data. *Scores:* any model used with walk-forward retraining satisfies this;
+   a model fit *once* on all history and frozen (a risk for #4/#11 if we never re-fit) would
+   eventually fall behind — so the *procedure* matters as much as the model.
+
+**Net profile we're describing:** a **regularised, partially-pooled, count model with a stable
+seasonal component and slow trend adaptation, re-fit on a rolling window.** Notice this *is* the
+description of #4 (NegBin GLM with store/SKU effects + seasonal terms, walk-forward) and #11
+(Bayesian hierarchical) — which is why they sit at the top of the menu. Keep it as *axes to
+confirm in the meeting*, not a pre-announced winner.
+
 **Questions to ask.** *Have the decision-analytics majors decided? Do they want a black-box
 challenger benchmarked against the GLM? Is the extra complexity of ZINB or Bayesian hierarchical
-worth it for the grading?*
+worth it for the grading? Do they agree with the four "don't" axes above — partial pooling,
+stable seasonality, slow trend adaptation, walk-forward retraining?*
 
-**Decision needed.** Lock the primary model (or confirm "majors decide") + the confidence format (80%/95% interval coverage).
+**Decision needed.** Lock the primary model (or confirm "majors decide") + the confidence format
+(80%/95% interval coverage) + confirm the model satisfies the four "don't" criteria.
 
 ### Topic 3 — Deliverable: plan the total output
 
