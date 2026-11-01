@@ -1,0 +1,47 @@
+[
+  {
+    "harmonics": 1,
+    "train_weeks": 40,
+    "agg_wape": 0.16229091632564555
+  },
+  {
+    "harmonics": 2,
+    "train_weeks": 40,
+    "agg_wape": 0.16282535233008172
+  },
+  {
+    "harmonics": 3,
+    "train_weeks": 40,
+    "agg_wape": 0.16342214360769997
+  },
+  {
+    "harmonics": 1,
+    "train_weeks": 26,
+    "agg_wape": 0.1735595130471977
+  },
+  {
+    "harmonics": 2,
+    "train_weeks": 26,
+    "agg_wape": 0.17913622393052286
+  },
+  {
+    "harmonics": 3,
+    "train_weeks": 26,
+    "agg_wape": 0.6766185093205166
+  },
+  {
+    "harmonics": 1,
+    "train_weeks": 13,
+    "agg_wape": 0.324156487813481
+  },
+  {
+    "harmonics": 2,
+    "train_weeks": 13,
+    "agg_wape": 0.4210356332211197
+  },
+  {
+    "harmonics": 3,
+    "train_weeks": 13,
+    "agg_wape": 15.982769954838734
+  }
+]

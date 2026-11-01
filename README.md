@@ -238,3 +238,68 @@
 - **B 类队友补充（140 店地址/坐标、500 米竞争店、连锁乳品网价差）** — 2026-10-27 由队友提供，具体采集来源与许可证**未核实**；文件内标注「网上参考价，未核实实体分店实价」。⚠ 引用前须向队友确认原始出处与授权。
 - **门店坐标 JSON（stores_hkIsland / stores_kowloon / stores_newTerritories）** — 列于 A 类「门店坐标原始 JSON」，但 README 未记录其具体来源。⚠ 来源待确认后再引用。
 - **E 类生成数据（dairy_weekly_d1d2d3、dairy_weekly_demo、dairy_daily_recovery）** — 全部为**模拟合成销量**，**不对应任何真实交易**，亦**无外部数据源**，不可引用为真实数据。仅可说明「本仓库按数据生成规格合成，用于方法评估」。
+
+## 模型验证结果（2026-10-30，全年 140×120 跑）
+
+> 全部数字由 `model.py` → `evaluate.py` → `ablation.py` 生成，图表由 `make_figures.py` 复现。
+> 完整说明见 [`MODEL_RESULTS.md`](MODEL_RESULTS.md)。以下均为**模拟销量 D2**上的结果，
+> 不是真实销售表现，不可当作真实准确率引用。
+
+### 关键数字
+
+| 指标 | 数值 | 说明 |
+|---|---|---|
+| 预测规模 | 218,400 行 | 140 店 × 120 SKU × 13 周，walk-forward |
+| 回测耗时 | 9 分 26 秒 | 4 次重训，约 2.4 分钟/次 |
+| 单元格 WAPE | **0.817** | 朴素基线（每单元格均值）为 0.842 |
+| 门店-周聚合 WAPE | **0.100** | 基线 0.114 |
+| MAE 相对最佳朴素基线 | **+3.0%** | 幅度不大，属诚实读数 |
+| 偏差 | **+5.1%** | 略超「偏差 5% 以内」的目标 |
+| 80% 区间实际覆盖 | 91.3% | 区间偏宽，需换 conformal |
+
+### 图 1 — 四个驱动因子的回收情况
+
+促销深度、气温、假日天数三个的 95% 区间都覆盖了生成器里设定的真值；竞争对手数不可识别
+（门店内无变异，被门店截距吸收）。
+
+![驱动因子回收](figures/fig1_coefficient_recovery.png)
+
+### 图 2 — 哪些「改动」真的有用（逐项消融）
+
+去掉 store×SKU 随机效应是唯一大幅变差的改动（+26% WAPE）；β 收缩、池化强度几乎没有影响。
+注意「加线性趋势」让单元格 WAPE 变好，却让聚合误差接近翻倍 —— 单一指标会骗人。
+
+![消融实验](figures/fig2_ablation.png)
+
+### 图 3 — 区间校准
+
+80% 区间实际覆盖 91.3%，95% 覆盖 98.6%。方向是「过度保守」而非「过度自信」，
+但按 slide 11 自订的成功标准，这一项目前**不通过**。
+
+![区间校准](figures/fig3_calibration.png)
+
+### 图 4 — 相对显式基线
+
+预测零、全局均值、每单元格均值三个基线都必须列出来，否则 WAPE 没有意义 ——
+本数据约 48% 是零值，单元格层面噪声极大。
+
+![基线对比](figures/fig4_baselines.png)
+
+### 图 5 — 季节项谐波数不能超配
+
+同样三个谐波，训练 40 周时没问题，训练 13 周时预测直接发散（聚合 WAPE 15.98）。
+建议默认改为 1 个谐波。
+
+![季节项敏感性](figures/fig5_seasonality.png)
+
+### 复现
+
+```bash
+python generate_datasets.py
+python build_panel.py
+python model.py --stores 140 --skus 120 --refit-every 4 --train-end 40
+python evaluate.py --check-noise
+python ablation.py --stores 40 --skus 40      # 消融在子集上跑，快
+python make_figures.py --sweep                # 仅首次：生成季节项扫描数据
+python make_figures.py                        # 输出 figures/*.png
+```

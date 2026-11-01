@@ -1,0 +1,15 @@
+{
+  "estimator": "MAP/Laplace hierarchical NegBin (PyMC not installed)",
+  "random_effects": "store + sku + store\u00d7sku",
+  "n_rows": 890400,
+  "n_stores": 140,
+  "n_skus": 120,
+  "n_cells": 16800,
+  "dispersion_r": 0.1853204401284084,
+  "sigma_store": 0.09272172514869245,
+  "sigma_sku": 0.17689471409055843,
+  "sigma_cell": 0.9087162361904177,
+  "converged": true,
+  "train_end_week": 40,
+  "refit_every": 4
+}

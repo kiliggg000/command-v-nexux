@@ -1,0 +1,38 @@
+{
+  "n_test_rows": 201600,
+  "accuracy": [
+    {
+      "forecast": "model",
+      "WAPE": 0.8168,
+      "MAE": 43.395,
+      "bias": 0.0509
+    },
+    {
+      "forecast": "zero",
+      "WAPE": 1.0,
+      "MAE": 53.127,
+      "bias": 1.0
+    },
+    {
+      "forecast": "global mean",
+      "WAPE": 1.1377,
+      "MAE": 60.445,
+      "bias": -0.0603
+    },
+    {
+      "forecast": "cell mean",
+      "WAPE": 0.8417,
+      "MAE": 44.716,
+      "bias": -0.0603
+    }
+  ],
+  "mae_skill_vs_best_naive": 0.0295,
+  "aggregate_wape_model": 0.1002,
+  "aggregate_wape_cell_mean": 0.1142,
+  "coverage_80": 0.913,
+  "coverage_95": 0.9855,
+  "calibration_verdict": "OVER-CONSERVATIVE (intervals too wide)",
+  "store_bias_mean": 0.0501,
+  "store_bias_absmax": 0.1852,
+  "recovery": null
+}

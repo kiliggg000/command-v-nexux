@@ -181,7 +181,9 @@ start = date(2024, 1, 1)
 
 
 def to_weekly(qty):
-    qf = qty.reshape(N_DAY, N_STORE * N_SKU)              # (366, 16800)
+    # qty is (N_STORE, N_SKU, N_DAY); move day to the front before flattening,
+    # otherwise the 7-day blocks mix different stores/SKUs (silent corruption).
+    qf = qty.transpose(2, 0, 1).reshape(N_DAY, N_STORE * N_SKU)   # (366, 16800) day-major
     out = np.zeros((N_STORE * N_SKU, N_WEEK))
     np.add.at(out, (np.arange(N_STORE * N_SKU)[:, None], week_idx[None, :]), qf.T)
     return out.reshape(N_STORE, N_SKU, N_WEEK)

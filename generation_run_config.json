@@ -24,12 +24,12 @@
   },
   "carry_mean": 0.12467640371708241,
   "realized_zero_rate": 0.8752837952120739,
-  "d2_total_tonnes": 33748.670442200004,
-  "d1_total_tonnes": 34038.23538699999,
-  "d3_total_tonnes": 33732.1507428,
+  "d2_total_tonnes": 30082.875401,
+  "d1_total_tonnes": 34202.3909065,
+  "d3_total_tonnes": 30087.5300244,
   "noise_floor_check": {
     "d1_mean_vs_d2_mean_ratio": 1.0056282147987694,
-    "d1_var_vs_d2_var_ratio": 0.9780969589199104
+    "d1_var_vs_d2_var_ratio": 0.8569892560431815
   },
   "d3_qualifying_stores": 49
 }
