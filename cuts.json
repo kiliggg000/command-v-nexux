@@ -1,0 +1,65 @@
+{
+  "by_horizon": [
+    {
+      "horizon": 1,
+      "n_rows": 50400,
+      "cell_wape": 0.8135,
+      "store_week_wape": 0.0949,
+      "bias": 0.0425
+    },
+    {
+      "horizon": 2,
+      "n_rows": 50400,
+      "cell_wape": 0.8116,
+      "store_week_wape": 0.1043,
+      "bias": 0.059
+    },
+    {
+      "horizon": 3,
+      "n_rows": 50400,
+      "cell_wape": 0.8236,
+      "store_week_wape": 0.1031,
+      "bias": 0.0494
+    },
+    {
+      "horizon": 4,
+      "n_rows": 50400,
+      "cell_wape": 0.8187,
+      "store_week_wape": 0.0987,
+      "bias": 0.0526
+    }
+  ],
+  "by_volume": [
+    {
+      "quintile": 0,
+      "mean_units": 80.0,
+      "mean_bias": -1.0915,
+      "n_cells": 3246
+    },
+    {
+      "quintile": 1,
+      "mean_units": 233.0,
+      "mean_bias": -0.1343,
+      "n_cells": 3259
+    },
+    {
+      "quintile": 2,
+      "mean_units": 448.0,
+      "mean_bias": 0.0041,
+      "n_cells": 3236
+    },
+    {
+      "quintile": 3,
+      "mean_units": 791.0,
+      "mean_bias": 0.0566,
+      "n_cells": 3242
+    },
+    {
+      "quintile": 4,
+      "mean_units": 1750.0,
+      "mean_bias": 0.1149,
+      "n_cells": 3245
+    }
+  ],
+  "corr_log_volume_bias": 0.436
+}

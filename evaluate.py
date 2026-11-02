@@ -33,6 +33,11 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parent
 
+# The run this report describes refits every four weeks (see model.py --refit-every).
+# The baselines are refreshed on the same cadence so that the comparison is about the
+# model, not about which side saw the more recent weeks.
+REFIT_EVERY = 4
+
 
 # ------------------------------------------------------------------ metric helpers
 def wape(y: np.ndarray, yhat: np.ndarray) -> float:
@@ -57,28 +62,49 @@ def coverage(y, lo, hi) -> float:
 
 
 # ------------------------------------------------------------------ baselines
-def add_baselines(fc: pd.DataFrame, panel: pd.DataFrame, train_end: int) -> pd.DataFrame:
-    """Attach three naive forecasts computed on the SAME training window.
+def add_baselines(fc: pd.DataFrame, panel: pd.DataFrame, train_end: int,
+                  refit_every: int = REFIT_EVERY, refresh: bool = True) -> pd.DataFrame:
+    """Attach three naive forecasts computed on the SAME information as the model.
 
     zero        : predict 0 for everything.  On a 49%-zero target this is a genuinely
                   strong baseline for absolute error, which is why it must be shown.
     global_mean : predict the training-window mean for every cell.
     cell_mean   : predict each (store, SKU)'s own training-window mean — the "each
                   store already knows itself" baseline the brief warns about.
-    """
-    tr = panel[panel["week_index"] < train_end]
-    # restrict history to the modelled store/SKU subset, but keep ALL weeks so the
-    # training window is intact
-    tr = tr[tr["store_id"].isin(fc["store_id"].unique())
-            & tr["Product Code"].isin(fc["Product Code"].unique())]
-    g = float(tr["y"].mean())
-    cell = tr.groupby(["store_id", "Product Code"])["y"].mean().rename("cell_mean")
 
-    fc = fc.merge(cell, on=["store_id", "Product Code"], how="left")
-    fc["cell_mean"] = fc["cell_mean"].fillna(g)      # unseen cell -> global mean
-    fc["zero"] = 0.0
-    fc["global_mean"] = g
-    return fc
+    refresh=True gives each forecast block the history the model had when it produced
+    that block (weeks < block start), so the comparison isolates the model from the
+    information.  refresh=False freezes every block on weeks < train_end, which is what
+    earlier versions of this report did; the model refits every four weeks, so that
+    version hands the model four extra weeks of data and flatters it.  Measured on the
+    full run: cell_mean 0.8417 frozen, 0.8391 refreshed, i.e. 2.96% skill frozen and
+    2.65% refreshed.
+    """
+    fc = fc.copy()
+    hist = panel[panel["store_id"].isin(fc["store_id"].unique())
+                 & panel["Product Code"].isin(fc["Product Code"].unique())]
+
+    if not refresh:
+        fc["_blk"] = 0
+        cuts = {0: train_end}
+    else:
+        fc["_blk"] = ((fc["week_index"] - train_end) // refit_every).clip(lower=0).astype(int)
+        cuts = {b: train_end + b * refit_every for b in sorted(fc["_blk"].unique())}
+
+    parts = []
+    for b, cut in cuts.items():
+        tr = hist[hist["week_index"] < cut]
+        g = float(tr["y"].mean())
+        cell = tr.groupby(["store_id", "Product Code"])["y"].mean().rename("cell_mean")
+        seg = fc[fc["_blk"] == b].drop(columns="_blk").merge(
+            cell, on=["store_id", "Product Code"], how="left")
+        seg["cell_mean"] = seg["cell_mean"].fillna(g)      # unseen cell -> global mean
+        seg["global_mean"] = g
+        parts.append(seg)
+
+    out = pd.concat(parts, ignore_index=True)
+    out["zero"] = 0.0
+    return out
 
 
 def complete_weeks() -> set[int]:
@@ -98,12 +124,12 @@ def complete_weeks() -> set[int]:
 
 
 # ------------------------------------------------------------------ main report
-def main(check_noise: bool = False, train_end: int = 40):
+def main(check_noise: bool = False, train_end: int = 40, refresh_baseline: bool = True):
     fc = pd.read_parquet(ROOT / "forecast_weekly.parquet")
     panel = pd.read_parquet(ROOT / "panel_weekly.parquet")
     # NOTE: use the FULL panel here. Filtering it to the forecast's keys would also
     # drop the training weeks, leaving the baselines with no history to average over.
-    fc = add_baselines(fc, panel, train_end)
+    fc = add_baselines(fc, panel, train_end, REFIT_EVERY, refresh_baseline)
 
     keep = complete_weeks()
     n_all = len(fc)
@@ -185,6 +211,12 @@ def main(check_noise: bool = False, train_end: int = 40):
         "calibration_verdict": verdict,
         "store_bias_mean": round(float(sb.bias.mean()), 4),
         "store_bias_absmax": round(float(sb.bias.abs().max()), 4),
+        # absmax loses the direction: a store can be the worst by over- or under-
+        # forecasting, and the two call for different actions.  Keep the signed ends.
+        "store_bias_min": round(float(sb.bias.min()), 4),
+        "store_bias_max": round(float(sb.bias.max()), 4),
+        "baseline_refreshed": bool(refresh_baseline),
+        "refit_every": REFIT_EVERY,
         "recovery": noise,
     }
     (ROOT / "evaluation_report.json").write_text(json.dumps(out, indent=2))
@@ -264,6 +296,15 @@ def check_recovery(train_end: int = 40):
           f"-> {'PASS (detects effect)' if detects else 'FAIL (missed effect)'}")
 
     res["verdict"] = {"d1_collapse": bool(collapse), "d2_detect": bool(detects)}
+    # The two halves of this file run on different samples: the coefficients come from
+    # the subset loaded above, the D3 comparison from the full daily file.  Recording it
+    # stops the report from implying one sample.
+    res["resolution"] = {
+        "n_stores": n_st, "n_skus": n_sk, "train_end": train_end,
+        "note": "D1/D2 coefficients from this subset; D3 from the full daily file",
+    }
+    print(f"  resolution: D1/D2 fitted on {n_st} stores x {n_sk} SKUs; "
+          f"D3 paired comparison on the full daily file")
     res["d3_direct"] = d3_direct_check()
     return res
 
@@ -328,5 +369,8 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--check-noise", action="store_true")
     ap.add_argument("--train-end", type=int, default=40)
+    ap.add_argument("--frozen-baseline", action="store_true",
+                    help="freeze every baseline block on weeks < train-end (the pre-v6 "
+                         "behaviour, which gives the model four extra weeks of history)")
     a = ap.parse_args()
-    main(a.check_noise, a.train_end)
+    main(a.check_noise, a.train_end, refresh_baseline=not a.frozen_baseline)

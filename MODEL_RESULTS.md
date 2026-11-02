@@ -250,6 +250,13 @@ Outputs: `forecast_weekly.parquet`, `coefficients.csv`, `diagnostics.json`,
 | `depth_pct` 95% CI | [0.829, 1.351] | **[1.068, 1.213]** |
 | σ_store / σ_cell | 0.146 / 0.873 | 0.093 / 0.909 |
 
+> **Baseline definition changed after this table was written.** Every baseline above was
+> frozen on weeks < 40 while the model refitted every four weeks, which handed the model
+> four extra weeks of data. `evaluate.py` now refreshes the baselines on the model's own
+> cadence; on the same information the full-run skill is **+2.65%**, not +3.0%, and the
+> per-cell baseline is 0.8391 rather than 0.8417. `--frozen-baseline` reproduces this
+> table exactly. The model's own WAPE is unchanged either way.
+
 Two things to take from this:
 
 - The aggregate WAPE **halved** (0.1682 → 0.1002). Summing 120 SKUs instead of 40 averages
