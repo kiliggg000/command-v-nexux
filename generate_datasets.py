@@ -31,6 +31,14 @@ import pyarrow.parquet as pq
 
 SEED = 20261027
 rng = np.random.default_rng(SEED)
+
+# D4 variant (opt-in, writes its own files): same seed, same mu surface, same NB draws
+# -- only the carry mask changes, so it draws assortment conditional on store type.
+#   python generate_datasets.py --variant d4
+import sys
+VARIANT = "d2"
+if "--variant" in sys.argv:
+    VARIANT = sys.argv[sys.argv.index("--variant") + 1]
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -141,7 +149,31 @@ lp = (CFG["beta_store"] * np.log(store_weight))[:, None, None] \
    + CFG["beta_promo"] * depth[None, :, :]
 
 # beta0 calibration: scale so total EXPECTED kg == target_tonnes * 1000
-carry = np.clip(rng.beta(1.0, 6.58, size=(N_STORE, N_SKU)), CFG["carry_lo"], CFG["carry_hi"])
+carry_base = rng.beta(1.0, 6.58, size=(N_STORE, N_SKU))
+carry = np.clip(carry_base, CFG["carry_lo"], CFG["carry_hi"])
+
+if VARIANT == "d4":
+    # Each store gets a type from the district median-income quartile -- a label the
+    # retailer has when the store opens, not something inferred from sales. Each type
+    # carries its own core assortment: 55 per cent of SKUs at ~4x the rate of the rest.
+    # The draw keeps D2's ranks (probability-integral transform of the same base draw),
+    # so the two panels differ only in how assortment is distributed across stores.
+    from scipy.stats import beta as beta_dist
+    q = np.quantile(med_income, [0.25, 0.50, 0.75])
+    store_type = np.digitize(med_income, q)                     # (140,) in 0..3
+    core_rng = np.random.default_rng(SEED + 1)
+    core = core_rng.random((4, N_SKU)) < 0.55                   # (4,120)
+    ratio = np.where(core, 2.20, 0.55)                          # 4:1 core vs tail
+    base_mean = 1.0 / 7.58
+    target_mean = np.clip(base_mean * ratio / (0.55 * 2.20 + 0.45 * 0.55), 0.02, 0.60)
+    kappa = 7.58
+    a = target_mean * kappa
+    b = (1.0 - target_mean) * kappa
+    u_pit = 1.0 - (1.0 - carry_base) ** 6.58                    # CDF of Beta(1, 6.58)
+    carry = np.clip(beta_dist.ppf(u_pit, a[store_type], b[store_type]),
+                    CFG["carry_lo"], CFG["carry_hi"])
+    print(f"[d4] store types {np.bincount(store_type).tolist()}; "
+          f"carry mean {carry.mean():.4f} (d2 {carry_base.mean():.4f})")
 mu0 = np.exp(lp)
 expected_kg = np.sum(carry[:, :, None] * mu0 * pack_kg[None, :, None])
 beta0 = np.log(CFG["target_tonnes"] * 1000.0 / expected_kg)
@@ -212,12 +244,21 @@ flat = pd.DataFrame({
     "qty_d3": w_d3.ravel().astype(np.int32),
     "spurious_z": np.repeat(gender_mix, N_SKU * N_WEEK)[si],   # zero true effect
 })
-flat.to_parquet(fpath("dairy_weekly_d1d2d3.parquet"), index=False)
+SUFFIX = "" if VARIANT == "d2" else "_" + VARIANT
+flat.to_parquet(fpath(f"dairy_weekly_d1d2d3{SUFFIX}.parquet"), index=False)
+
+# The true weekly conditional mean. Only meaningful where the variant exists: it is the
+# best any forecaster could do, so it sets the floor on achievable WAPE for that panel.
+if VARIANT != "d2":
+    w_mu = to_weekly(mu * carry[:, :, None])   # carry zeroes the days the store does not stock it
+    pd.DataFrame({"store_id": store_id[si], "Product Code": prod_code[ki],
+                  "week_index": wi.astype(np.int32), "mu_true": w_mu.ravel()}
+                 ).to_parquet(fpath(f"weekly_mu{SUFFIX}.parquet"), index=False)
 
 # Demo subset (first 40 SKU x first 60 store x weeks) for easy EDA
 demo = flat[(flat["store_id"].isin(store_id[:60])) & (flat["Product Code"].isin(prod_code[:40]))]
-demo.to_parquet(fpath("dairy_weekly_demo.parquet"), index=False)
-demo.to_csv(fpath("dairy_weekly_demo.csv"), index=False)
+demo.to_parquet(fpath(f"dairy_weekly_demo{SUFFIX}.parquet"), index=False)
+demo.to_csv(fpath(f"dairy_weekly_demo{SUFFIX}.csv"), index=False)
 
 # Daily recovery subset (first 30 store x first 40 SKU x 366 day) with full daily features
 ri, ki2, ti = np.meshgrid(np.arange(30), np.arange(40), np.arange(N_DAY), indexing="ij")
@@ -239,8 +280,8 @@ rec = pd.DataFrame({
     "qty_d3": qty_d3[ri, ki2, ti],
     "spurious_z": np.repeat(gender_mix[:30], 40 * N_DAY)[ri],
 })
-rec.to_parquet(fpath("dairy_daily_recovery.parquet"), index=False)
-rec.to_csv(fpath("dairy_daily_recovery.csv"), index=False)
+rec.to_parquet(fpath(f"dairy_daily_recovery{SUFFIX}.parquet"), index=False)
+rec.to_csv(fpath(f"dairy_daily_recovery{SUFFIX}.csv"), index=False)
 
 # ---------------------------------------------------------------------------
 # Validation + run config
@@ -263,7 +304,7 @@ run_cfg = {
     },
     "d3_qualifying_stores": int(qual_store.sum()),
 }
-with open(fpath("generation_run_config.json"), "w") as f:
+with open(fpath(f"generation_run_config{SUFFIX}.json"), "w") as f:
     json.dump(run_cfg, f, indent=2)
 
 print("[generate] script ready (NOT executed). Summary would be:")

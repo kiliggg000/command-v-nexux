@@ -44,8 +44,9 @@ CATS = ["type", "promo_type"]
 
 
 # ----------------------------------------------------------------------------- data
-def load_panel(stores: int | None, skus: int | None) -> pd.DataFrame:
-    df = pd.read_parquet(ROOT / "panel_weekly.parquet")
+def load_panel(stores: int | None, skus: int | None,
+               panel: str = "panel_weekly.parquet") -> pd.DataFrame:
+    df = pd.read_parquet(ROOT / panel)
     if stores:
         keep = sorted(df["store_id"].unique())[:stores]
         df = df[df["store_id"].isin(keep)]
@@ -60,6 +61,18 @@ def load_panel(stores: int | None, skus: int | None) -> pd.DataFrame:
         if df[c].isna().any():
             df[c] = df[c].fillna(df[c].median())
     return df
+
+
+def store_type(df: pd.DataFrame, n_types: int = 4):
+    """Assign each store a type from its district's median income quartile.
+
+    Deliberately not derived from sales: a retailer knows a store's format and catchment
+    when the lease is signed, so a cold-start model may use it. Returns (types, store_ids)
+    in the same order as `store_ids` sorted.
+    """
+    inc = df.groupby("store_id")["log_income"].first().sort_index()
+    cuts = inc.quantile(np.linspace(0, 1, n_types + 1)[1:-1]).to_numpy()
+    return np.digitize(inc.to_numpy(), cuts), inc.index.to_numpy()
 
 
 def design_matrix(df: pd.DataFrame):
@@ -80,7 +93,7 @@ def design_matrix(df: pd.DataFrame):
 
 # ----------------------------------------------------------------------------- model
 def fit_nb(X, si, ki, y, n_stores, n_skus, lam_b=0.1, lam_u=2.0, lam_v=2.0,
-           ci=None, n_cells=0, lam_w=0.5):
+           ci=None, n_cells=0, lam_w=0.5, ct=None, n_seg=0, lam_m=1.0):
     """MAP fit of  log μ = Xβ + u[store] + v[sku] (+ w[store×sku]).
 
     The optional `w` term is a store×SKU random intercept.  It is not cosmetic: the
@@ -92,14 +105,17 @@ def fit_nb(X, si, ki, y, n_stores, n_skus, lam_b=0.1, lam_u=2.0, lam_v=2.0,
     p = X.shape[1]
     g1, g2 = gammaln(y + 1), None  # placeholder
     use_w = ci is not None and n_cells > 0
+    use_m = use_w and ct is not None and n_seg > 0
     off = p + n_stores + n_skus
+    off_m = off + n_cells
 
     def obj(theta):
         beta, u = theta[:p], theta[p:p + n_stores]
         v, logr = theta[p + n_stores:off], theta[-1]
         r = np.exp(logr)
         eta = X @ beta + u[si] + v[ki]
-        w = theta[off:-1] if use_w else None
+        w = theta[off:off_m] if use_w else None
+        m = theta[off_m:-1] if use_m else None
         if use_w:
             eta = eta + w[ci]
         mu = np.exp(np.clip(eta, -20.0, 20.0))
@@ -113,6 +129,16 @@ def fit_nb(X, si, ki, y, n_stores, n_skus, lam_b=0.1, lam_u=2.0, lam_v=2.0,
         gv = -np.bincount(ki, weights=g, minlength=n_skus) + lam_v * v
         dll_dr = digamma(y + r) - digamma(r) + np.log(r) + 1.0 - np.log(r + mu) - (y + r) / (r + mu)
         glogr = -(r * dll_dr).sum()
+        if use_m:
+            # w_ij ~ N(m[t(i),j], 1/lam_w) instead of N(0, 1/lam_w): a store's
+            # cell effects are shrunk toward what its *type* does on that SKU, not
+            # toward zero. A held-out store has no rows, so w collapses to m and the
+            # forecast is the type profile.
+            dev = w - m[ct]
+            nll = nll + 0.5 * lam_w * (dev @ dev) + 0.5 * lam_m * (m @ m)
+            gw = -np.bincount(ci, weights=g, minlength=n_cells) + lam_w * dev
+            gm = np.bincount(ct, weights=lam_w * dev, minlength=n_seg) + lam_m * m
+            return nll, np.r_[gb, gu, gv, gw, gm, glogr]
         if use_w:
             gw = -np.bincount(ci, weights=g, minlength=n_cells) + lam_w * w
             nll = nll + 0.5 * lam_w * (w @ w)
@@ -120,10 +146,17 @@ def fit_nb(X, si, ki, y, n_stores, n_skus, lam_b=0.1, lam_u=2.0, lam_v=2.0,
         return nll, np.r_[gb, gu, gv, glogr]
 
     theta0 = np.r_[np.zeros(p), np.zeros(n_stores), np.zeros(n_skus),
-                   np.zeros(n_cells) if use_w else np.zeros(0), np.log(1.0)]
+                   np.zeros(n_cells) if use_w else np.zeros(0),
+                   np.zeros(n_seg) if use_m else np.zeros(0), np.log(1.0)]
     res = minimize(obj, theta0, jac=True, method="L-BFGS-B",
                    options={"maxiter": 1500, "ftol": 1e-9})
     return res.x, res.success, res.fun
+
+
+def segment_flat(theta, p, n_stores, n_skus, n_cells, n_seg):
+    """The m block, flat, indexed the same way as `ct` (type * n_skus + sku)."""
+    off_m = p + n_stores + n_skus + n_cells
+    return theta[off_m:off_m + n_seg]
 
 
 def unpack(theta, p, n_stores, n_skus, n_cells=0):

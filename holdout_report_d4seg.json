@@ -1,0 +1,58 @@
+{
+  "purpose": "cold-start check: K stores excluded from every fit",
+  "panel": "panel_weekly_d4.parquet",
+  "segment_prior": true,
+  "lam_m": 1.0,
+  "n_stores": 140,
+  "n_skus": 120,
+  "n_held": 20,
+  "seed": 0,
+  "held_store_ids": [
+    "CC_037afdba40be",
+    "CC_157821b0b0c2",
+    "CC_4d3dc3c45e43",
+    "CC_5277ce733be0",
+    "CC_5ff1f56def9c",
+    "CC_666717b1f6c9",
+    "CC_6aada501da19",
+    "CC_7d410de80c8c",
+    "CC_9de29181342d",
+    "CC_a32e2140c079",
+    "CC_aabb915aedac",
+    "CC_c9d186d018d8",
+    "CC_db40503c24b6",
+    "CC_e01a508f8a80",
+    "CC_e5d056202a43",
+    "CC_e7ab7614c0d1",
+    "CC_ef7788a0d7ab",
+    "CC_f35ab035b1fb",
+    "CC_f7b822435325",
+    "CC_fa75bd84425f"
+  ],
+  "train_end": 40,
+  "refit_every": 4,
+  "scored_weeks": [
+    40,
+    51
+  ],
+  "preprocessing": "scaler fitted on each block's training rows only",
+  "held": {
+    "n_rows": 28800,
+    "wape": 1.0264,
+    "wape_level_corrected": 1.0065,
+    "bias": 0.2901,
+    "coverage_80": 0.8156,
+    "zero_share": 0.506
+  },
+  "seen": {
+    "n_rows": 172800,
+    "wape": 0.8683,
+    "wape_level_corrected": 0.9038,
+    "bias": -0.0706,
+    "coverage_80": 0.9061,
+    "zero_share": 0.5016
+  },
+  "reference": {
+    "predict_zero_wape": 1.0
+  }
+}

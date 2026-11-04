@@ -27,8 +27,8 @@ def _read(name: str, **kw) -> pd.DataFrame:
     return pd.read_csv(ROOT / name, encoding="utf-8-sig", **kw)
 
 
-def load_sales() -> pd.DataFrame:
-    df = pd.read_parquet(ROOT / "dairy_weekly_d1d2d3.parquet")
+def load_sales(name: str = "dairy_weekly_d1d2d3.parquet") -> pd.DataFrame:
+    df = pd.read_parquet(ROOT / name)
     df["Product Code"] = df["Product Code"].astype(str)
     df["week_start"] = pd.to_datetime(df["week_start"])
     return df
@@ -154,8 +154,8 @@ def load_promo_weekly() -> pd.DataFrame:
     return pr
 
 
-def build() -> pd.DataFrame:
-    df = load_sales()
+def build(sales: str = "dairy_weekly_d1d2d3.parquet") -> pd.DataFrame:
+    df = load_sales(sales)
     df = df.merge(load_sku(), on="Product Code", how="left")
     df = df.merge(load_competitors(), on="store_id", how="left")
     df = df.merge(load_stores(), on="store_id", how="left")
@@ -187,8 +187,10 @@ def build() -> pd.DataFrame:
 
 
 if __name__ == "__main__":
-    panel = build()
-    out = ROOT / "panel_weekly.parquet"
+    import sys
+    src = sys.argv[1] if len(sys.argv) > 1 else "dairy_weekly_d1d2d3.parquet"
+    panel = build(src)
+    out = ROOT / (sys.argv[2] if len(sys.argv) > 2 else "panel_weekly.parquet")
     panel.to_parquet(out, index=False)
 
     print(f"wrote {out}  shape={panel.shape}")

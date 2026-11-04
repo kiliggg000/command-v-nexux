@@ -1,0 +1,51 @@
+{
+  "purpose": "cold-start check: K stores excluded from every fit",
+  "panel": "panel_weekly.parquet",
+  "segment_prior": false,
+  "history_weeks": null,
+  "lam_m": null,
+  "lam_w": 0.5,
+  "variance_corrected": false,
+  "n_stores": 40,
+  "n_skus": 40,
+  "n_held": 10,
+  "seed": 0,
+  "held_store_ids": [
+    "CC_037afdba40be",
+    "CC_0516e8fd6738",
+    "CC_05a872978b15",
+    "CC_085f23498b86",
+    "CC_12cc8ee8f692",
+    "CC_1cf9cfa74bc7",
+    "CC_29be9846f031",
+    "CC_2ef04a63f826",
+    "CC_3545389c307c",
+    "CC_45e2980df883"
+  ],
+  "train_end": 40,
+  "refit_every": 1,
+  "scored_weeks": [
+    40,
+    51
+  ],
+  "preprocessing": "scaler fitted on each block's training rows only",
+  "held": {
+    "n_rows": 4800,
+    "wape": 0.9931,
+    "wape_level_corrected": 0.9893,
+    "bias": 0.3574,
+    "coverage_80": 0.7998,
+    "zero_share": 0.4798
+  },
+  "seen": {
+    "n_rows": 14400,
+    "wape": 0.8319,
+    "wape_level_corrected": 0.8295,
+    "bias": 0.0401,
+    "coverage_80": 0.9121,
+    "zero_share": 0.4794
+  },
+  "reference": {
+    "predict_zero_wape": 1.0
+  }
+}

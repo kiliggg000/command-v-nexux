@@ -1,0 +1,35 @@
+{
+  "seed": 20261027,
+  "n_store": 140,
+  "n_sku": 120,
+  "n_day": 366,
+  "n_week": 53,
+  "cfg": {
+    "beta_pack": -0.3,
+    "beta_store": 1.0,
+    "beta_comp": -0.02,
+    "beta_promo": 1.2,
+    "r_dispersion": 4.0,
+    "beta_wknd": 0.08,
+    "beta_sun": 0.05,
+    "beta_hol": 0.15,
+    "beta_season": 0.1,
+    "beta_trend": 0.05,
+    "beta_rain": -0.005,
+    "beta_temp": 0.005,
+    "target_tonnes": 30000.0,
+    "carry_lo": 0.02,
+    "carry_hi": 0.3,
+    "d3_boost": 0.05
+  },
+  "carry_mean": 0.1234805046944303,
+  "realized_zero_rate": 0.8765655087171481,
+  "d2_total_tonnes": 30046.877724100003,
+  "d1_total_tonnes": 33964.0903152,
+  "d3_total_tonnes": 30065.491696999998,
+  "noise_floor_check": {
+    "d1_mean_vs_d2_mean_ratio": 1.0148419410223737,
+    "d1_var_vs_d2_var_ratio": 0.8683658692265278
+  },
+  "d3_qualifying_stores": 49
+}
